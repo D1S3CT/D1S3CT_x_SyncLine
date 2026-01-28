@@ -12,6 +12,11 @@ def main(page: ft.Page):
     page.window_height = 550
     page.window_resizable = False
     page.padding = 0
+    # Начальные значения (потом будем сохранять в конфиг-файл)
+    cloud_folder_name = ft.TextField(label="Папка в облаке", value="SyncLine_Backup", border_color="#3498DB")
+    access_token = ft.TextField(label="Yandex Token", password=True, can_reveal_password=True, border_color="#3498DB")
+    sync_interval = ft.Slider(min=1, max=60, divisions=60, label="{value} мин", value=5)
+    log_file_path = ft.Text("logs/syncline.log", size=12, italic=True)
 
     # --- Логика выбора папки ---
     def on_directory_result(e: ft.FilePickerResultEvent):
@@ -53,6 +58,31 @@ def main(page: ft.Page):
         print(f"Трей пока не поддался: {e}")
 
     # --- Элементы интерфейса ---
+    def save_settings(e):
+        log_info(f"Настройки сохранены: {cloud_folder_name.value}")
+        settings_dialog.open = False
+        page.update()
+
+    settings_dialog = ft.AlertDialog(
+        title=ft.Text("Настройки конфигурации"),
+        content=ft.Column([
+            cloud_folder_name,
+            access_token,
+            ft.Text("Интервал проверки (минуты):", size=12, weight="bold"),
+            sync_interval,
+            ft.Divider(),
+            ft.Row([
+                ft.Text("Файл логов:"),
+                log_file_path,
+                ft.IconButton(ft.icons.EDIT_DOCUMENT, icon_size=16, on_click=lambda _: log_info("Смена пути логов..."))
+            ])
+        ], tight=True, spacing=15),
+        actions=[
+            ft.TextButton("Отмена", on_click=lambda _: setattr(settings_dialog, "open", False) or page.update()),
+            ft.ElevatedButton("Сохранить", bgcolor="#2C3E50", color=ft.colors.WHITE, on_click=save_settings),
+        ],
+    )
+    page.overlay.append(settings_dialog)
 
     # Шапка
     header = ft.WindowDragArea(
@@ -61,7 +91,7 @@ def main(page: ft.Page):
                 # Левая часть: авторский бейдж
                 ft.Container(
                     content=ft.Text(
-                        "made by D1S3CT",
+                        "made by D1S3CT Labs.",
                         size=11,
                         weight="w500",
                         color=ft.colors.BLACK45,  # Мягкий серый цвет
@@ -98,7 +128,7 @@ def main(page: ft.Page):
                     icon_color="#2C3E50",
                     icon_size=20,
                     tooltip="Настройки",
-                    on_click=lambda _: log_info("Открытие настроек...")
+                    on_click=lambda _: setattr(settings_dialog, "open", True) or page.update()
                 ),
             ], alignment=ft.MainAxisAlignment.CENTER, spacing=10),
 
