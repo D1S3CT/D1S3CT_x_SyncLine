@@ -43,7 +43,6 @@ def main(page: ft.Page):
 
     # --- Трей (Работает железно в 0.19.0) ---
     try:
-        # Используем самый простой способ через создание объектов 'в лоб'
         page.tray_icon_name = "sync"
         page.tray_icon_menu_items = [
             ft.PopupMenuItem(text="Развернуть",
@@ -59,14 +58,27 @@ def main(page: ft.Page):
     header = ft.WindowDragArea(
         content=ft.Container(
             content=ft.Row([
-                ft.Text(" D1S3CT x SyncLine", weight="bold", size=14, color=ft.colors.WHITE),
+                # Левая часть: авторский бейдж
+                ft.Container(
+                    content=ft.Text(
+                        "made by D1S3CT",
+                        size=11,
+                        weight="w500",
+                        color=ft.colors.BLACK45,  # Мягкий серый цвет
+                        font_family="Verdana"  # Или стандартный для системы
+                    ),
+                    padding=ft.padding.only(left=5),
+                ),
+                # Правая часть: стандартные кнопки
                 ft.Row([
-                    ft.IconButton(ft.icons.MINIMIZE, on_click=minimize_app, icon_color=ft.colors.WHITE70),
-                    ft.IconButton(ft.icons.CLOSE, on_click=close_app, icon_color=ft.colors.RED_400),
-                ])
+                    ft.IconButton(ft.icons.MINIMIZE, on_click=minimize_app, icon_color=ft.colors.BLACK45, icon_size=18),
+                    ft.IconButton(ft.icons.CLOSE, on_click=close_app, icon_color=ft.colors.RED_300, icon_size=18),
+                ], spacing=0)
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            padding=ft.padding.only(left=20, right=10),
+            bgcolor=ft.colors.WHITE,  # Теперь хедер белый
+            padding=ft.padding.only(left=15, right=10),
             height=40,
+            border_radius=ft.border_radius.only(top_left=15, top_right=15)
         )
     )
 
@@ -74,19 +86,37 @@ def main(page: ft.Page):
     error_list = ft.ListView(expand=True, spacing=5)
     selected_path_text = ft.Text("Папка не выбрана", italic=True, color=ft.colors.WHITE54)
 
-    # Центральный блок
-    sync_icon = ft.Icon(name=ft.icons.SYNC_ROUNDED, color=ft.colors.BLUE_400, size=80)
-
     status_card = ft.Container(
         content=ft.Column([
-            sync_icon,
-            ft.Text("Cloud Synchronizer", size=24, weight="bold", color=ft.colors.WHITE),
+            ft.Icon(name=ft.icons.DNS_ROUNDED, color="#2C3E50", size=80),
+
+            # Строка с названием и настройками
             ft.Row([
-                ft.ElevatedButton("Выбрать папку", icon=ft.icons.FOLDER_OPEN,
-                                  on_click=lambda _: file_picker.get_directory_path()),
-                ft.ElevatedButton("Запустить", bgcolor=ft.colors.BLUE_600, color=ft.colors.WHITE,
-                                  on_click=lambda _: log_info("Служба синхронизации запущена...")),
-            ], alignment=ft.MainAxisAlignment.CENTER),
+                ft.Text("SyncLine", size=28, weight="bold", color="#2C3E50"),
+                ft.IconButton(
+                    icon=ft.icons.SETTINGS_OUTLINED,
+                    icon_color="#2C3E50",
+                    icon_size=20,
+                    tooltip="Настройки",
+                    on_click=lambda _: log_info("Открытие настроек...")
+                ),
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=10),
+
+            ft.Row([
+                ft.ElevatedButton(
+                    "Выбрать папку",
+                    icon=ft.icons.FOLDER_OPEN_OUTLINED,
+                    color="#2C3E50",
+                    bgcolor=ft.colors.WHITE,
+                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10))
+                ),
+                ft.ElevatedButton(
+                    "Запустить",
+                    bgcolor="#2C3E50",  # Темная кнопка для акцента
+                    color=ft.colors.WHITE,
+                    on_click=lambda _: log_info("Запуск мониторинга...")
+                ),
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=15),
             selected_path_text
         ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
         expand=True
@@ -96,27 +126,26 @@ def main(page: ft.Page):
     logs_panel = ft.Container(
         content=ft.Tabs(
             selected_index=0,
+            label_color="#2C3E50",
+            unselected_label_color="#95A5A6",
+            indicator_color="#2C3E50",
             tabs=[
                 ft.Tab(text="События (INFO)", content=info_list),
                 ft.Tab(text="Ошибки (ERRORS)", content=error_list),
             ],
         ),
-        height=200,
-        bgcolor=ft.colors.with_opacity(0.1, ft.colors.BLACK),
+        height=220,
+        bgcolor="#F8F9F9",  # Почти белый, но отделяет зону логов
         padding=10,
         border_radius=ft.border_radius.only(bottom_left=15, bottom_right=15)
     )
 
-    # Финальная сборка
+    # Финальная сборка (Весь фон белый)
     main_layout = ft.Container(
         content=ft.Column([header, status_card, logs_panel], spacing=0),
-        gradient=ft.LinearGradient(
-            begin=ft.alignment.top_left, end=ft.alignment.bottom_right,
-            colors=[ft.colors.GREY_900, ft.colors.BLACK]
-        ),
-        blur=30,
+        bgcolor=ft.colors.WHITE,
         border_radius=15,
-        border=ft.border.all(1, ft.colors.WHITE10),
+        border=ft.border.all(1, "#E5E7E9"),
         expand=True
     )
 
