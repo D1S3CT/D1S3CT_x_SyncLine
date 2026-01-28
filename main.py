@@ -261,14 +261,31 @@ def main(page: ft.Page):
     # --- Логика выбора папки ---
     def on_directory_result(e: ft.FilePickerResultEvent):
         if e.path:
-            selected_path_text.value = e.path
-            log_info(f"Локальная папка установлена: {e.path}")
+            # 1. Проверяем, работает ли сейчас сервер
+            is_running = hasattr(page, "observer") and page.observer and page.observer.is_alive()
 
-            # Сразу обновляем конфиг, чтобы путь не потерялся
+            if is_running:
+                log_info("Смена папки... Останавливаем активную синхронизацию.")
+                try:
+                    page.observer.stop()
+                    page.observer.join(timeout=1)
+                    page.observer = None
+
+                    # Возвращаем интерфейс в состояние "Готов к запуску"
+                    btn_start.text = "Запустить"
+                    btn_start.bgcolor = "#2C3E50"
+                    status_icon.color = "#2C3E50"
+                except Exception as ex:
+                    log_error(f"Ошибка при авто-остановке: {ex}")
+
+            # 2. Обновляем путь в интерфейсе и конфиге
+            selected_path_text.value = e.path
+
             current_config = load_config()
             current_config["local_path"] = e.path
             save_config(current_config)
 
+            log_info(f"Новая локальная папка: {e.path}")
             page.update()
 
     # Логика выбора папки для логов
