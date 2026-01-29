@@ -225,7 +225,7 @@ def main(page: ft.Page):
     def start_sync(e):
         local_path = page.selected_path_control.value
         token = access_token.value.strip()
-        remote_base_folder = f"/{cloud_folder_name.value}"
+        remote_base = f"/{cloud_folder_name.value}"
 
         if local_path == "Папка не выбрана" or not token:
             log_error("Ошибка: Проверьте токен и выбор папки!")
@@ -238,57 +238,123 @@ def main(page: ft.Page):
                 log_error("Токен невалиден!")
                 return False
 
-            log_info("Связь установлена. Проверка облачной папки...")
-            if not y.exists(remote_base_folder):
-                y.mkdir(remote_base_folder)
+            # --- Шаг 1: Подготовка базы ---
+            if not y.exists(remote_base):
+                y.mkdir(remote_base)
+                log_info(f"Создана корневая папка: {remote_base}")
 
+            # --- ШАГ 2 ТЕПЕРЬ ТУТ (Вне зависимости от того, создали мы папку или она была) ---
+            log_info("Выполняется первичная синхронизация (зеркалирование)...")
+
+            # 1. Собираем список локальных файлов
+            local_files_set = set()
+            for root, dirs, files in os.walk(local_path):
+                for name in files + dirs:
+                    full_path = os.path.join(root, name)
+                    rel_path = os.path.relpath(full_path, local_path).replace("\\", "/")
+                    local_files_set.add(rel_path)
+
+            # 2. Очистка облака (Зеркальное удаление)
+            log_info("Проверка облака на лишние файлы...")
+
+            def cleanup_remote(remote_dir):
+                try:
+                    for item in y.listdir(remote_dir):
+                        r_item_path = item.path
+                        # Корректно вычисляем относительный путь для сравнения
+                        rel_path = r_item_path.replace(remote_base, "").lstrip("/")
+
+                        if rel_path and rel_path not in local_files_set:
+                            log_info(f"Удаление лишнего: {rel_path}")
+                            y.remove(r_item_path, permanently=True)
+                        elif item.type == "dir":
+                            cleanup_remote(r_item_path)
+                except Exception as e:
+                    log_error(f"Ошибка чистки: {e}")
+
+            cleanup_remote(remote_base)
+
+            # 3. Дозагрузка/Обновление
+            log_info("Загрузка недостающих файлов...")
+            for rel_path in local_files_set:
+                local_item_path = os.path.join(local_path, rel_path.replace("/", os.sep))
+                remote_item_path = f"{remote_base}/{rel_path}"
+
+                if os.path.isfile(local_item_path):
+                    if not y.exists(remote_item_path):
+                        log_info(f"Синхронизация: {rel_path}")
+                        with open(local_item_path, "rb") as f:
+                            y.upload(f, remote_item_path, overwrite=True)
+                elif os.path.isdir(local_item_path):
+                    if not y.exists(remote_item_path):
+                        y.mkdir(remote_item_path)
+
+            log_info("Зеркалирование завершено.")
+
+            # --- Шаг 3: Настройка Watchdog ---
             class SyncHandler(FileSystemEventHandler):
-                def process_file(self, src_path):
-                    # Вычисляем относительный путь, чтобы сохранить структуру папок
+                def get_remote_path(self, src_path):
                     rel_path = os.path.relpath(src_path, local_path)
-                    # Заменяем обратные слеши Windows на прямые для Яндекс.Диска
-                    remote_path = f"{remote_base_folder}/{rel_path}".replace("\\", "/")
+                    return f"{remote_base}/{rel_path}".replace("\\", "/")
 
-                    # Проверяем и создаем подпапки в облаке, если они есть
-                    remote_dir = os.path.dirname(remote_path)
-                    self.ensure_remote_dir(remote_dir)
-
-                    try:
-                        log_info(f"Синхронизация: {rel_path}...")
-                        with open(src_path, "rb") as f:
-                            y.upload(f, remote_path, overwrite=True)
-                        log_info(f"Готово: {rel_path}")
-                    except Exception as upload_err:
-                        log_error(f"Ошибка загрузки {rel_path}: {upload_err}")
-
-                def ensure_remote_dir(self, path):
-                    # Рекурсивное создание папок на Яндекс.Диске
-                    parts = path.split('/')
-                    current_path = ""
-                    for part in parts:
-                        if not part: continue
-                        current_path += f"/{part}"
-                        if not y.exists(current_path):
-                            y.mkdir(current_path)
+                def ensure_remote_dir(self, r_path):
+                    parts = r_path.split('/')
+                    curr = ""
+                    for p in parts:
+                        if not p: continue
+                        curr += f"/{p}"
+                        if not y.exists(curr): y.mkdir(curr)
 
                 def on_created(self, event):
-                    if not event.is_directory:
-                        self.process_file(event.src_path)
+                    r_path = self.get_remote_path(event.src_path)
+                    if event.is_directory:
+                        if not y.exists(r_path):
+                            y.mkdir(r_path)
+                            log_info(f"Создана папка в облаке: {os.path.basename(r_path)}")
+                    else:
+                        try:
+                            with open(event.src_path, "rb") as f:
+                                y.upload(f, r_path, overwrite=True)
+                            log_info(f"Новый файл: {os.path.basename(r_path)}")
+                        except Exception as err:
+                            log_error(f"Ошибка создания: {err}")
 
                 def on_modified(self, event):
                     if not event.is_directory:
-                        # Небольшая задержка, чтобы файл успел "освободиться" приложением
-                        time.sleep(0.5)
-                        self.process_file(event.src_path)
+                        r_path = self.get_remote_path(event.src_path)
+                        time.sleep(0.3)  # Даем ОС время закрыть файл после записи
+                        try:
+                            with open(event.src_path, "rb") as f:
+                                y.upload(f, r_path, overwrite=True)
+                            log_info(f"Обновлен: {os.path.basename(r_path)}")
+                        except Exception as err:
+                            log_error(f"Ошибка обновления: {err}")
 
-            # Создаем и запускаем обзервер
+                def on_deleted(self, event):
+                    r_path = self.get_remote_path(event.src_path)
+                    try:
+                        if y.exists(r_path):
+                            y.remove(r_path, permanently=True)
+                            log_info(f"Удалено из облака: {os.path.basename(r_path)}")
+                    except Exception as err:
+                        log_error(f"Ошибка удаления: {err}")
+
+                def on_moved(self, event):
+                    old_r_path = self.get_remote_path(event.src_path)
+                    new_r_path = self.get_remote_path(event.dest_path)
+                    try:
+                        if y.exists(old_r_path):
+                            y.move(old_r_path, new_r_path)
+                            log_info(f"Переименовано: {os.path.basename(new_r_path)}")
+                    except Exception as err:
+                        log_error(f"Ошибка перемещения: {err}")
+
             page.observer = Observer()
-            # recursive=True позволяет мониторить вложенные папки
             page.observer.schedule(SyncHandler(), local_path, recursive=True)
             page.observer.daemon = True
             page.observer.start()
 
-            log_info(f"💪 Мониторинг активен (рекурсивно): {local_path}")
+            log_info(f"💪 Мониторинг запущен: {local_path}")
             return True
 
         except Exception as ex:
