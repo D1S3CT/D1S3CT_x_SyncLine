@@ -6,6 +6,9 @@ import yadisk
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import threading
+import pystray
+from PIL import Image
+import signal
 
 # --- 1. Глобальные утилиты ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,18 +34,99 @@ def save_config(data):
 
 # --- 2. Основная логика приложения ---
 def main(page: ft.Page):
+    page.client_storage.set("app_id", "disect_labs.syncline_yandex")
+
+    # Путь к иконке (относительно папки assets)
+    page.window_icon = "icon.png"
+
     # Загружаем данные сразу при входе в main
     config = load_config()
 
+    # --- 1. Логика Трей-иконки и Управления окном ---
+    def exit_app(e=None):
+        # 1. Сначала визуально скрываем окно, чтобы пользователь видел реакцию
+        page.window.visible = False
+        page.update()
+
+        # 2. Останавливаем мониторинг (Watchdog)
+        if hasattr(page, "observer") and page.observer:
+            try:
+                page.observer.stop()
+            except:
+                pass
+
+        # 3. Останавливаем трей
+        if hasattr(page, "tray_icon") and page.tray_icon:
+            try:
+                page.tray_icon.stop()
+            except:
+                pass
+
+        # 4. Уничтожаем окно Flet (освобождаем дескриптор Windows)
+        try:
+            page.window.destroy()
+        except:
+            pass
+
+        # 5. Только теперь убиваем процесс Python
+        time.sleep(0.1) # Короткая пауза для завершения системных очередей
+        os._exit(0)
+
+    def show_app(icon, item):
+        icon.stop()  # Останавливаем цикл трея
+        page.tray_running = False
+        page.window_visible = True
+        page.window_minimized = False
+        page.update()
+        page.window_to_front()  # Выводим на передний план
+
+    def create_tray_icon():
+        if hasattr(page, "tray_running") and page.tray_running:
+            return
+        try:
+            image = Image.open("assets/icon.png")
+        except:
+            image = Image.new('RGB', (64, 64), color=(44, 62, 80))
+
+        menu = pystray.Menu(
+            pystray.MenuItem('Развернуть', show_app, default=True),
+            pystray.MenuItem('Выход', exit_app)
+        )
+        page.tray_icon = pystray.Icon("SyncLine", image, "SyncLine", menu)
+        page.tray_running = True
+        page.tray_icon.run()
+
+    def on_window_event(e):
+        if e.data == "close":
+            exit_app()  # Вызываем очистку и выход
+        elif e.data == "minimize":
+            page.window.visible = False
+            page.update()
+            log_info("SyncLine свернут в трей.")
+            threading.Thread(target=create_tray_icon, daemon=True).start()
+
+    def close_app(e):
+        os._exit(0)
+
+    def minimize_app(e):
+        page.window.minimized = True
+        page.update()
+
     # --- Базовые настройки страницы ---
-    page.title = "SyncLine x Yandex"
-    page.window_title_bar_hidden = True
-    page.window_bgcolor = ft.colors.TRANSPARENT
-    page.bgcolor = ft.colors.TRANSPARENT
-    page.window_width = 850
-    page.window_height = 550
-    page.window_resizable = False
-    page.padding = 0
+    page.window.title_bar_hidden = True
+    page.window.bgcolor = ft.Colors.TRANSPARENT
+    page.bgcolor = ft.Colors.TRANSPARENT
+    page.window.width = 850
+    page.window.height = 550
+    page.window.resizable = False
+
+    # ПЕРЕД тем как вешать события, делаем update
+    page.update()
+
+    # Теперь вешаем обработчик
+    page.window.prevent_close = True
+    page.window.on_event = on_window_event
+
 
     btn_start = ft.ElevatedButton(
         "Запустить",
@@ -136,16 +220,14 @@ def main(page: ft.Page):
     # Переменная для хранения наблюдателя (чтобы можно было остановить)
     page.observer = None
 
-
     def start_sync(e):
-        # Используем атрибут страницы, который мы создали для борьбы с дублями
         local_path = page.selected_path_control.value
         token = access_token.value.strip()
         remote_folder = f"/{cloud_folder_name.value}"
 
         if local_path == "Папка не выбрана" or not token:
             log_error("Ошибка: Проверьте токен и выбор папки!")
-            return
+            return False
 
         y = yadisk.YaDisk(token=token)
 
@@ -171,41 +253,19 @@ def main(page: ft.Page):
                         except Exception as upload_err:
                             log_error(f"Ошибка загрузки {filename}: {upload_err}")
 
-            # --- КРИТИЧЕСКИЙ ФИКС ДЛЯ PYTHON 3.13 ---
-            def run_observer_safe():
-                try:
-                    # Создаем локальный объект, не привязанный к page напрямую при старте
-                    obs = Observer()
-                    obs.schedule(SyncHandler(), local_path, recursive=False)
-
-                    # Самый важный момент: запуск без лишних проверок
-                    obs.start()
-
-                    # Сохраняем уже запущенный объект
-                    page.sync_observer = obs
-
-                    while True:
-                        time.sleep(1)
-                        if not obs.is_alive():
-                            break
-                except Exception as obs_err:
-                    # Если здесь снова вылетит _ThreadHandle, значит 3.13 блокирует watchdog 3.0.0
-                    print(f"Поток мониторинга упал: {obs_err}")
-
-            t = threading.Thread(target=run_observer_safe, daemon=True)
-            t.start()
-
+            # Создаем и запускаем только ОДИН обзервер
             page.observer = Observer()
             page.observer.schedule(SyncHandler(), local_path, recursive=False)
+            # Поток внутри watchdog по умолчанию daemon, но мы перестрахуемся
+            page.observer.daemon = True
             page.observer.start()
 
             log_info(f"💪 Мониторинг запущен: {local_path}")
-            return True  # Успешный запуск!
+            return True
 
         except Exception as ex:
             log_error(f"Ошибка старта: {ex}")
-            return False  # Что-то пошло не так
-
+            return False
 
     def write_to_file(level, message):
         # Берем путь из нашего текстового поля настроек
@@ -324,22 +384,8 @@ def main(page: ft.Page):
     )
     page.overlay.append(settings_dialog)
 
+
     # --- UI Компоненты ---
-    def close_app(e): page.window_close()
-
-    def minimize_app(e): page.window_minimized = True; page.update()
-
-    # Трей
-    try:
-        page.tray_icon_name = "sync"
-        page.tray_icon_menu_items = [
-            ft.PopupMenuItem(text="Развернуть",
-                             on_click=lambda _: setattr(page, "window_minimized", False) or page.update()),
-            ft.PopupMenuItem(text="Выход", on_click=close_app),
-        ]
-    except:
-        pass
-
     # Шапка
     header = ft.WindowDragArea(
         content=ft.Container(
@@ -358,7 +404,7 @@ def main(page: ft.Page):
                 # Правая часть: стандартные кнопки
                 ft.Row([
                     ft.IconButton(ft.icons.MINIMIZE, on_click=minimize_app, icon_color=ft.colors.BLACK45, icon_size=18),
-                    ft.IconButton(ft.icons.CLOSE, on_click=close_app, icon_color=ft.colors.RED_300, icon_size=18),
+                    ft.IconButton(ft.icons.CLOSE, on_click=exit_app, icon_color=ft.colors.RED_300, icon_size=18),
                 ], spacing=0)
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             bgcolor=ft.colors.WHITE,  # Теперь хедер белый
@@ -439,5 +485,11 @@ def main(page: ft.Page):
         bgcolor=ft.colors.WHITE, border_radius=15, border=ft.border.all(1, "#E5E7E9"), expand=True
     ))
 
+
+
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.app(
+        target=main,
+        # Путь к иконке для окна и панели задач
+        assets_dir="assets",
+    )
