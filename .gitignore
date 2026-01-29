@@ -1,0 +1,24 @@
+# Конфигурационные файлы (чувствительные данные)
+config.json
+
+# Виртуальное окружение
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller (исключаем только временные файлы сборки, оставляем результат в dist)
+build/
+*.spec
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# Настройки VS Code / PyCharm
+.vscode/
+.idea/
