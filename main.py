@@ -113,12 +113,14 @@ def main(page: ft.Page):
         page.update()
 
     # --- Базовые настройки страницы ---
-    page.window.title_bar_hidden = True
-    page.window.bgcolor = ft.Colors.TRANSPARENT
-    page.bgcolor = ft.Colors.TRANSPARENT
-    page.window.width = 850
-    page.window.height = 550
-    page.window.resizable = False
+    page.title = "SyncLine x Yandex"
+    page.window_title_bar_hidden = True
+    page.window_bgcolor = ft.colors.TRANSPARENT
+    page.bgcolor = ft.colors.TRANSPARENT
+    page.window_width = 850
+    page.window_height = 550
+    page.window_resizable = False
+    page.padding = 0
 
     # ПЕРЕД тем как вешать события, делаем update
     page.update()
